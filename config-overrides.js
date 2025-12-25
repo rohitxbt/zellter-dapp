@@ -2,19 +2,22 @@ const webpack = require('webpack');
 
 module.exports = {
   webpack: function(config, env) {
-    // 1. Force handle .mjs and .js files with loose rules
-    // We removed 'include: /node_modules/' to ensure this applies to ALL imports
-    config.module.rules.push({
-      test: /\.m?js/,
-      resolve: {
-        fullySpecified: false
-      }
-    });
+    // --- CRITICAL FIX START ---
+    // We must find the 'oneOf' array and insert our rule there.
+    // Adding it to the top level config.module.rules DOES NOT WORK in CRA v5.
+    const oneOfRule = config.module.rules.find((rule) => rule.oneOf);
+    
+    if (oneOfRule) {
+      oneOfRule.oneOf.unshift({
+        test: /\.m?js$/,
+        resolve: {
+          fullySpecified: false, // This forces Webpack to accept the Zama package import
+        },
+      });
+    }
+    // --- CRITICAL FIX END ---
 
-    // 2. Add .mjs to the resolve extensions
-    config.resolve.extensions = ['.mjs', '.js', '.jsx', '.ts', '.tsx', '.json', ...config.resolve.extensions];
-
-    // 3. Polyfills for Node.js core modules (Required for Zama/Web3)
+    // Polyfills
     config.resolve.fallback = {
       ...config.resolve.fallback,
       "crypto": require.resolve("crypto-browserify"),
@@ -28,16 +31,17 @@ module.exports = {
       "process": require.resolve("process/browser"),
       "buffer": require.resolve("buffer/"),
     };
+
+    // Extensions & Plugins
+    config.resolve.extensions = ['.mjs', '.js', '.jsx', '.ts', '.tsx', '.json', ...config.resolve.extensions];
     
-    // 4. Provide Global Variables
     config.plugins = (config.plugins || []).concat([
       new webpack.ProvidePlugin({
         process: 'process/browser',
         Buffer: ['buffer', 'Buffer']
       })
     ]);
-    
-    // 5. Ignore source map warnings that clutter logs
+
     config.ignoreWarnings = [/Failed to parse source map/];
 
     return config;
