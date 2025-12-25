@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ethers } from 'ethers';
-import { createInstance, SepoliaConfig, initSDK } from '@zama-fhe/relayer-sdk';
+import { createInstance, SepoliaConfig, initSDK } from '@zama-fhe/relayer-sdk/relayer';
 import ZetterArtifact from './Zetter.json';
 import './App.css';
 import gsap from 'gsap';
