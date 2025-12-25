@@ -2,26 +2,13 @@ const webpack = require('webpack');
 
 module.exports = {
   webpack: function(config, env) {
-    // 1. [CRITICAL] Fix "'.' is not exported"
-    // This makes your setup behave like Next.js by looking for
-    // 'node' or 'default' versions of the package.
-    config.resolve.conditionNames = [
-      "import", 
-      "require", 
-      "node", 
-      "default", 
-      "browser"
-    ];
+    // --- THE NUCLEAR FIX ---
+    // This forces Webpack to ignore the broken 'exports' map in the Zama SDK.
+    // It will fall back to the standard 'main' file, bypassing the error.
+    config.resolve.exportsFields = []; 
+    // -----------------------
 
-    // 2. Fix .mjs files
-    config.module.rules.push({
-      test: /\.m?js$/,
-      resolve: {
-        fullySpecified: false,
-      },
-    });
-
-    // 3. Standard Polyfills
+    // 1. Standard Polyfills
     config.resolve.fallback = {
       ...config.resolve.fallback,
       "crypto": require.resolve("crypto-browserify"),
@@ -36,6 +23,7 @@ module.exports = {
       "buffer": require.resolve("buffer/"),
     };
 
+    // 2. Global Variables
     config.plugins = (config.plugins || []).concat([
       new webpack.ProvidePlugin({
         process: 'process/browser',
@@ -43,13 +31,20 @@ module.exports = {
       })
     ]);
 
+    // 3. Allow .mjs files
+    config.module.rules.push({
+      test: /\.m?js$/,
+      resolve: {
+        fullySpecified: false,
+      },
+    });
+    
     // 4. Extensions
     config.resolve.extensions = ['.mjs', '.js', '.jsx', '.ts', '.tsx', '.json', ...config.resolve.extensions];
 
     return config;
   },
-  
-  // Keep devServer to fix header errors
+
   devServer: function(configFunction) {
     return function(proxy, allowedHost) {
       const config = configFunction(proxy, allowedHost);
