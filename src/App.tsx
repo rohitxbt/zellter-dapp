@@ -14,13 +14,6 @@ const CONTRACT_ADDRESS = "0xE01fDcEB7a8dD55fA947436b2082f283b964313A";
 const ZETTER_ABI = ZetterArtifact.abi;
 const SEPOLIA_CHAIN_ID = 11155111;
 
-declare global {
-  interface Window {
-    gsap: any;
-    ethereum?: any;
-  }
-}
-
 interface VaultData {
   owner: string;
   heartbeat: number;
