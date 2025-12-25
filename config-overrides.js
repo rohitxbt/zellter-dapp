@@ -1,8 +1,20 @@
 const webpack = require('webpack');
 
 module.exports = {
-  // 1. Webpack Polyfills
   webpack: function(config, env) {
+    // 1. Force handle .mjs and .js files with loose rules
+    // We removed 'include: /node_modules/' to ensure this applies to ALL imports
+    config.module.rules.push({
+      test: /\.m?js/,
+      resolve: {
+        fullySpecified: false
+      }
+    });
+
+    // 2. Add .mjs to the resolve extensions
+    config.resolve.extensions = ['.mjs', '.js', '.jsx', '.ts', '.tsx', '.json', ...config.resolve.extensions];
+
+    // 3. Polyfills for Node.js core modules (Required for Zama/Web3)
     config.resolve.fallback = {
       ...config.resolve.fallback,
       "crypto": require.resolve("crypto-browserify"),
@@ -14,8 +26,10 @@ module.exports = {
       "url": require.resolve("url"),
       "vm": require.resolve("vm-browserify"),
       "process": require.resolve("process/browser"),
+      "buffer": require.resolve("buffer/"),
     };
     
+    // 4. Provide Global Variables
     config.plugins = (config.plugins || []).concat([
       new webpack.ProvidePlugin({
         process: 'process/browser',
@@ -23,26 +37,20 @@ module.exports = {
       })
     ]);
     
-    config.resolve.plugins = config.resolve.plugins.filter(plugin =>
-      !(plugin.constructor && plugin.constructor.name === "ModuleScopePlugin")
-    );
+    // 5. Ignore source map warnings that clutter logs
+    config.ignoreWarnings = [/Failed to parse source map/];
 
     return config;
   },
 
-  // 2. Dev Server Headers (Fixed)
   devServer: function(configFunction) {
     return function(proxy, allowedHost) {
       const config = configFunction(proxy, allowedHost);
-
-      // पुराने Headers के साथ नए Headers जोड़ें
       config.headers = {
         ...config.headers,
         "Cross-Origin-Opener-Policy": "same-origin",
-        "Cross-Origin-Embedder-Policy": "require-corp",
-        "Content-Security-Policy": "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https:; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https:; worker-src 'self' blob:; connect-src 'self' https: wss: blob:;"
+        "Cross-Origin-Embedder-Policy": "require-corp"
       };
-
       return config;
     };
   },
