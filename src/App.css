@@ -207,3 +207,103 @@ input[type=range]::-webkit-slider-runnable-track {
 }
 #noise-canvas { z-index: -5; opacity: 0.04; mix-blend-mode: overlay; }
 #particle-canvas { z-index: -4; }
+
+/* --- CUSTOM LOADER (User Request) --- */
+/* From Uiverse.io by chase2k25 */ 
+.loader-3d-cube {
+  width: 84px;
+  aspect-ratio: 1;
+  background:
+    linear-gradient(#ff4500 0 0) left/50% 100% no-repeat,
+    conic-gradient(
+      from -90deg at 32px 9.47px,
+      #fff8dc 135deg,
+      #8b0000 0 270deg,
+      #ffa500 0
+    );
+  background-blend-mode: multiply;
+  -webkit-mask: linear-gradient(
+      to bottom right,
+      #0000 8px,
+      #000 0 52px,
+      #0000 0
+    ),
+    conic-gradient(from -90deg at right 6px bottom 6px, #000 90deg, #0000 0);
+  mask: linear-gradient(to bottom right, #0000 8px, #000 0 52px, #0000 0),
+    conic-gradient(from -90deg at right 6px bottom 6px, #000 90deg, #0000 0);
+  background-size: 50% 50%;
+  -webkit-mask-size: 50% 50%;
+  mask-size: 50% 50%;
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+  animation: l9 1.8s infinite cubic-bezier(0.5, 0.2, 0.5, 1);
+  box-shadow: 0 0 15px rgba(255, 69, 0, 0.6);
+  transform: perspective(1000px) rotateY(15deg);
+}
+
+@keyframes l9 {
+  0% {
+    background-position: 0% 0%, 0 0;
+    transform: perspective(1000px) rotateY(15deg) scale(1);
+    box-shadow: 0 0 15px rgba(255, 69, 0, 0.6);
+  }
+  25% {
+    background-position: 100% 0%, 0 0;
+  }
+  50% {
+    background-position: 100% 100%, 0 0;
+    transform: perspective(1000px) rotateY(15deg) scale(1.08);
+    box-shadow: 0 0 25px rgba(255, 69, 0, 0.8);
+  }
+  75% {
+    background-position: 0% 100%, 0 0;
+  }
+  100% {
+    background-position: 0% 0%, 0 0;
+    transform: perspective(1000px) rotateY(15deg) scale(1);
+    box-shadow: 0 0 15px rgba(255, 69, 0, 0.6);
+  }
+}
+
+/* --- DECRYPTED SECRET MODAL --- */
+.secret-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  z-index: 9999;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.secret-modal {
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(255, 255, 255, 1);
+  border-radius: 24px;
+  padding: 32px;
+  width: 90%;
+  max-width: 500px;
+  box-shadow: 
+    0 20px 50px -10px rgba(0, 0, 0, 0.3),
+    0 0 0 1px rgba(0,0,0,0.05);
+  animation: scaleUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.secret-content-box {
+  background: #f5f5f5;
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
+  padding: 16px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  color: #333;
+  margin: 20px 0;
+  word-break: break-all;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes scaleUp { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }

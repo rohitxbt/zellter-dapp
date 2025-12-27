@@ -1,10 +1,9 @@
 const webpack = require('webpack');
+const path = require('path');
 
 module.exports = {
   webpack: function(config, env) {
     // --- THE NUCLEAR FIX ---
-    // This forces Webpack to ignore the broken 'exports' map in the Zama SDK.
-    // It will fall back to the standard 'main' file, bypassing the error.
     config.resolve.exportsFields = []; 
     // -----------------------
 
@@ -38,9 +37,58 @@ module.exports = {
         fullySpecified: false,
       },
     });
+
+    // 4. Ignore Source Maps for node_modules
+    config.module.rules.push({
+      test: /\.js$/,
+      enforce: "pre",
+      use: ["source-map-loader"],
+      exclude: /node_modules/,
+    });
+    config.ignoreWarnings = [/Failed to parse source map/];
     
-    // 4. Extensions
+    // 5. Extensions
     config.resolve.extensions = ['.mjs', '.js', '.jsx', '.ts', '.tsx', '.json', ...config.resolve.extensions];
+
+    // 6. Fix for aliases (Nuclear fallout mitigation)
+    config.resolve.alias = {
+        ...config.resolve.alias,
+        'x402/client': path.resolve(__dirname, 'node_modules/x402/dist/esm/client/index.mjs'),
+        '@reown/appkit/core': path.resolve(__dirname, 'node_modules/@reown/appkit-core/dist/esm/exports/index.js'),
+        '@reown/appkit-wallet/utils': path.resolve(__dirname, 'node_modules/@reown/appkit-wallet/dist/esm/exports/utils.js'),
+        '@noble/curves/bls12-381': path.resolve(__dirname, 'node_modules/@noble/curves/esm/bls12-381.js'),
+        '@noble/curves/ed25519': path.resolve(__dirname, 'node_modules/@noble/curves/esm/ed25519.js'),
+        '@noble/curves/secp256k1': path.resolve(__dirname, 'node_modules/@noble/curves/esm/secp256k1.js'),
+        '@noble/curves/bn254': path.resolve(__dirname, 'node_modules/@noble/curves/esm/bn254.js')
+    };
+    
+    // 7. FIXED: Process specific node_modules (viem, ox, privy)
+    // Updated with 'plugin-transform-class-static-block' to fix the SyntaxError
+    config.module.rules.push({
+        test: /\.(js|mjs|jsx|ts|tsx)$/,
+        include: [
+            path.resolve(__dirname, "node_modules/viem"),
+            path.resolve(__dirname, "node_modules/ox"),
+            path.resolve(__dirname, "node_modules/@privy-io"),
+            path.resolve(__dirname, "node_modules/@walletconnect")
+        ],
+        loader: require.resolve('babel-loader'),
+        options: {
+            presets: [
+                [require.resolve('babel-preset-react-app'), { runtime: 'automatic' }]
+            ],
+            // 👇 YEH LINE NAYI HAI - ISSE ERROR JAYEGA
+            plugins: [
+                require.resolve('@babel/plugin-transform-class-static-block')
+            ]
+        }
+    });
+
+    // 8. Fix for "Can't resolve .js extension" when it is actually .ts
+    config.resolve.extensionAlias = {
+        '.js': ['.ts', '.tsx', '.js', '.jsx'],
+        '.mjs': ['.mts', '.mjs']
+    };
 
     return config;
   },
