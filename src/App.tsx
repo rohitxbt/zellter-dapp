@@ -8,7 +8,7 @@ import gsap from 'gsap';
 import { TextPlugin } from 'gsap/TextPlugin';
 import { Flip } from 'gsap/all';
 import { uploadToIPFS, fetchFromIPFS } from './utils/ipfs';
-import { generateAESKey, encryptFile, decryptFile, exportKey, importKey, arrayBufferToBase64, base64ToArrayBuffer } from './utils/encryption';
+import { generateAESKey, encryptFile, decryptFile, arrayBufferToBase64, base64ToArrayBuffer, exportKeyRaw, importKeyRaw } from './utils/encryption';
 
 gsap.registerPlugin(TextPlugin, Flip);
 
@@ -36,7 +36,7 @@ interface VaultData {
 
 function InnerApp() {
   // Privy Hooks
-  const { login, authenticated, user, logout } = usePrivy();
+  const { login, authenticated, logout } = usePrivy();
   const { wallets } = useWallets();
 
   // Core State
@@ -50,6 +50,12 @@ function InnerApp() {
   const [isFHELoading, setIsFHELoading] = useState(false); // Specific for FHE (custom loader)
   const [toast, setToast] = useState<{title: string, msg: string, icon: string} | null>(null);
 
+  // New Loading States
+  const [pingLoading, setPingLoading] = useState<{[key: number]: boolean}>({});
+  const [claimLoading, setClaimLoading] = useState<{[key: number]: boolean}>({});
+  const [claimStep, setClaimStep] = useState<string>("");
+
+
   // Form State
   const [payloadType, setPayloadType] = useState<number>(PayloadType.TEXT);
   const [storageMode, setStorageMode] = useState<number>(StorageMode.ONCHAIN_FHE);
@@ -59,6 +65,7 @@ function InnerApp() {
   const [durationVal, setDurationVal] = useState<number>(30);
   const [durationUnit, setDurationUnit] = useState<'minutes' | 'days' | 'years'>('days');
   const [beneficiaryInput, setBeneficiaryInput] = useState("");
+  const [isDragOver, setIsDragOver] = useState(false); // For drop zone
 
   // Data State
   const [myVaults, setMyVaults] = useState<VaultData[]>([]);
@@ -187,7 +194,6 @@ function InnerApp() {
     }
 
     setIsLoading(true);
-    let keyToBackup = "";
 
     try {
         let seconds = BigInt(durationVal);
@@ -199,16 +205,17 @@ function InnerApp() {
         let inputProof = "0x";
         let cid = "";
 
+        if (!fhevmInstance) throw new Error("FHEVM not initialized");
+        
+        // SHOW CUSTOM LOADER FOR FHE (which is now general Encryption Loader)
+        setIsFHELoading(true);
+
+        // Wait a bit to let UI render the loader before heavy calc
+        await new Promise(r => setTimeout(r, 100));
+
         // Encryption Logic
         if (storageMode === StorageMode.ONCHAIN_FHE) {
-            if (!fhevmInstance) throw new Error("FHEVM not initialized");
             
-            // SHOW CUSTOM LOADER FOR FHE
-            setIsFHELoading(true);
-
-            // Wait a bit to let UI render the loader before heavy calc
-            await new Promise(r => setTimeout(r, 100));
-
             const input = fhevmInstance.createEncryptedInput(CONTRACT_ADDRESS, account);
             
             let secretAsUint;
@@ -216,6 +223,7 @@ function InnerApp() {
                 if (/^\d+$/.test(secretText)) {
                     secretAsUint = BigInt(secretText);
                 } else {
+                    // Padding logic for text to 32 bytes if needed, but add256 handles BigInt
                     const utf8Bytes = ethers.toUtf8Bytes(secretText.slice(0, 31)); 
                     secretAsUint = BigInt(ethers.hexlify(utf8Bytes));
                 }
@@ -227,21 +235,32 @@ function InnerApp() {
             
             showToast("Generating Proof", "Constructing Zero-Knowledge Proof...", "psychology");
             const encResult = await input.encrypt();
-            encryptedSecretHandle = encResult.handles[0];
-            inputProof = encResult.inputProof;
             
-            setIsFHELoading(false); // Hide custom loader
-
+            // STRICT HEX CONVERSION for On-Chain mode
+            // Ensure we handle Uint8Array correctly
+            let handleBytes = encResult.handles[0];
+            if (handleBytes instanceof Uint8Array) {
+               encryptedSecretHandle = ethers.hexlify(handleBytes);
+            } else {
+               // Fallback if SDK returns something else (unlikely based on type)
+               encryptedSecretHandle = handleBytes; 
+            }
+            
+            if (typeof encResult.inputProof !== 'string') {
+               inputProof = ethers.hexlify(encResult.inputProof);
+            } else {
+               inputProof = encResult.inputProof;
+            }
+            
         } else {
             // OFFCHAIN_IPFS
             showToast("Encrypting", "Encrypting file/text locally...", "lock");
             
             // 1. Generate Key
             const key = await generateAESKey();
-            const exportedKey = await exportKey(key);
-            keyToBackup = exportedKey;
-            
-            // 2. Encrypt Content
+            // NO exportKey to user!
+
+            // 2. Encrypt Content (Payload)
             let blobToUpload: Blob;
             let iv: Uint8Array;
             
@@ -265,19 +284,47 @@ function InnerApp() {
             await new Promise(r => fileReader.onload = r);
             const base64Data = fileReader.result as string;
 
+            // 4. Encrypt AES Key using FHE
+            showToast("Securing Key", "Encrypting key with FHE...", "vpn_key");
+            const rawKey = await exportKeyRaw(key);
+            const keyBigInt = BigInt(ethers.hexlify(rawKey));
+
+            const input = fhevmInstance.createEncryptedInput(CONTRACT_ADDRESS, account);
+            input.add256(keyBigInt);
+            const encResult = await input.encrypt();
+            
+            // Convert byte array handle to Hex String
+            let handleHex;
+            if (encResult.handles[0] instanceof Uint8Array) {
+                handleHex = ethers.hexlify(encResult.handles[0]);
+            } else {
+                handleHex = encResult.handles[0];
+            }
+            
+            encryptedSecretHandle = handleHex;
+            
+            if (typeof encResult.inputProof !== 'string') {
+               inputProof = ethers.hexlify(encResult.inputProof);
+            } else {
+               inputProof = encResult.inputProof;
+            }
+
             const payload = JSON.stringify({
                 iv: ivBase64,
                 data: base64Data,
                 type: payloadType === PayloadType.FILE ? file?.type : 'text/plain',
-                name: payloadType === PayloadType.FILE ? file?.name : 'secret.txt'
+                name: payloadType === PayloadType.FILE ? file?.name : 'secret.txt',
+                encryptedKeyHandle: handleHex // Using Hex String!
             });
 
             const finalFile = new File([payload], "encrypted_payload.json", { type: "application/json" });
 
-            // 4. Upload to IPFS
+            // 5. Upload to IPFS
             showToast("Uploading", "Uploading to IPFS...", "cloud_upload");
             cid = await uploadToIPFS(finalFile);
         }
+
+        setIsFHELoading(false); // Hide custom loader
 
         const tx = await contract.createVault(
             seconds, 
@@ -290,22 +337,18 @@ function InnerApp() {
         );
         
         showToast("Processing", "Creating on-chain vault...", "hourglass_empty");
-        const receipt = await tx.wait();
+        await tx.wait();
         
-        if (keyToBackup) {
-            localStorage.setItem(`vault_key_latest`, keyToBackup);
-            // We use the new modal for this important info too, reusing revealedSecret state or a separate alert
-            // For now, keep alert for Key Backup to ensure it's distinct
-            alert(`⚠️ IMPORTANT: SAVE THIS KEY! ⚠️\n\nYou must share this key with the beneficiary manually. The contract does not store it.\n\nKEY: ${keyToBackup}`);
-        }
-
         showToast("Success", "Vault Created.", "lock");
         setView('vaults');
         fetchMyVaults();
 
     } catch (e: any) {
         console.error(e);
-        showToast("Error", e.reason || e.message || "Tx Failed", "error");
+        // Clean error message if it's that giant string
+        let msg = e.reason || e.message || "Tx Failed";
+        if (msg.length > 100) msg = "Transaction Reverted (Check input format)";
+        showToast("Error", msg, "error");
         setIsFHELoading(false);
     } finally {
         setIsLoading(false);
@@ -315,6 +358,7 @@ function InnerApp() {
   const pingVault = async (vaultId: number) => {
     if (!contract) return;
     try {
+        setPingLoading(prev => ({...prev, [vaultId]: true}));
         const tx = await contract.ping(vaultId);
         showToast("Sending Heartbeat", "Confirming life signs...", "ecg_heart");
         await tx.wait();
@@ -322,20 +366,36 @@ function InnerApp() {
         fetchMyVaults();
     } catch (e) {
         showToast("Error", "Ping failed.", "error");
+    } finally {
+        setPingLoading(prev => ({...prev, [vaultId]: false}));
     }
   };
 
   const claimVault = async (ownerAddr: string, vaultId: number) => {
     if (!contract) return;
     try {
+        setClaimLoading(prev => ({...prev, [vaultId]: true}));
+        setClaimStep("Validating vault conditions...");
+
+        // Simulate steps for better UX if it's too fast, or just update as we go
+        setTimeout(() => setClaimStep("Verifying beneficiary rights..."), 1000);
+
         const tx = await contract.claim(ownerAddr, vaultId);
-        showToast("Claiming", "Attempting to unlock vault...", "key");
+        
+        setClaimStep("Processing transaction...");
         await tx.wait();
+        
+        setClaimStep("Vault unlocked successfully!");
+        await new Promise(r => setTimeout(r, 1000)); // Show success briefly
+        
         showToast("Success", "Vault claimed! You can now view the secret.", "lock_open");
         fetchBeneficiaryVaults();
     } catch (e: any) {
         console.error(e);
         showToast("Error", "Claim failed (Time not elapsed?)", "error");
+    } finally {
+        setClaimLoading(prev => ({...prev, [vaultId]: false}));
+        setClaimStep("");
     }
   };
 
@@ -346,56 +406,107 @@ function InnerApp() {
       }
       
       try {
+          if (!fhevmInstance) {
+              showToast("Error", "FHEVM not ready", "error");
+              return;
+          }
+
+          // Use Claim Loader overlay for View Secret process too as it is complex
+          setClaimLoading(prev => ({...prev, [vaultId]: true}));
+          setClaimStep("Fetching encrypted data...");
+
+          let ciphertextHandle;
+          let ipfsPayload: any = null;
+
           if (storageMode === StorageMode.ONCHAIN_FHE) {
-              if (!fhevmInstance) {
-                  showToast("Error", "FHEVM not ready", "error");
-                  return;
-              }
-              // ON-CHAIN DECRYPTION
-              showToast("Fetching", "Getting encrypted data...", "cloud_download");
-              const ciphertextHandle = await contract.getSecret(ownerAddr, vaultId);
-              
+              // ON-CHAIN FHE: Get handle from contract
+              ciphertextHandle = await contract.getSecret(ownerAddr, vaultId);
               if (!ciphertextHandle || ciphertextHandle === ethers.ZeroHash || ciphertextHandle === "0x") {
                   throw new Error("No encrypted data found");
               }
+          } else {
+              // OFF-CHAIN IPFS: Get handle from IPFS (bypassing contract getSecret limitation)
+              setClaimStep("Fetching IPFS metadata...");
+              const cid = await contract.getCID(ownerAddr, vaultId);
+              const blob = await fetchFromIPFS(cid);
+              const text = await blob.text();
+              ipfsPayload = JSON.parse(text);
+              
+              if (ipfsPayload && ipfsPayload.encryptedKeyHandle) {
+                  const handleData = ipfsPayload.encryptedKeyHandle;
+                  // Handle both string formats: old (comma-separated bytes?) or new (hex string)
+                  if (typeof handleData === 'string' && handleData.startsWith('0x')) {
+                      // New format: Hex String -> Uint8Array
+                      ciphertextHandle = ethers.getBytes(handleData);
+                  } else {
+                      // Fallback or just assume it is parsable by Zama SDK (BigInt?)
+                      // If it was stored as BigInt string, converting back to BigInt might work
+                      ciphertextHandle = BigInt(handleData);
+                  }
+              } else {
+                  throw new Error("Encrypted key handle not found in IPFS payload.");
+              }
+          }
 
-              const keypair = fhevmInstance.generateKeypair();
-              const handleContractPairs = [{
-                  handle: ciphertextHandle,
-                  contractAddress: CONTRACT_ADDRESS
-              }];
-              
-              const eip712 = fhevmInstance.createEIP712(
-                  keypair.publicKey,
-                  [CONTRACT_ADDRESS]
-              );
-              
-              showToast("Sign Required", "Please sign to decrypt", "draw");
-              const signature = await signer.signTypedData(
-                  eip712.domain,
-                  { UserDecryptRequestVerification: eip712.types.UserDecryptRequestVerification },
-                  eip712.message
-              );
+          console.log("Generating keypair...");
+          const keypair = fhevmInstance.generateKeypair();
+          
+          // Prepare parameters based on Zama SDK Docs
+          // Docs: https://docs.zama.org/protocol/relayer-sdk-guides/fhevm-relayer/decryption/user-decryption
+          const contractAddresses = [CONTRACT_ADDRESS];
+          const startTimeStamp = Math.floor(Date.now() / 1000).toString();
+          const durationDays = '1'; // Short validity is fine for instant view
+          
+          const handleContractPairs = [{
+              handle: ciphertextHandle,
+              contractAddress: CONTRACT_ADDRESS
+          }];
+          
+          console.log("Creating EIP712...");
+          const eip712 = fhevmInstance.createEIP712(
+              keypair.publicKey,
+              contractAddresses,
+              startTimeStamp,
+              durationDays
+          );
 
-              showToast("Decrypting", "Requesting from Zama gateway...", "sync");
-              
-              // This can also be slow, show loader
-              setIsFHELoading(true);
-              
-              const result = await fhevmInstance.userDecrypt(
-                  handleContractPairs,
-                  keypair.privateKey,
-                  keypair.publicKey,
-                  signature.replace("0x", ""),
-                  [CONTRACT_ADDRESS],
-                  account
-              );
-              
-              setIsFHELoading(false);
+          if (!eip712 || !eip712.message) {
+              console.error("EIP712 creation failed:", eip712);
+              throw new Error("Failed to generate EIP712 message");
+          }
+          
+          setClaimStep("Waiting for signature...");
+          const signature = await signer.signTypedData(
+              eip712.domain,
+              { UserDecryptRequestVerification: eip712.types.UserDecryptRequestVerification },
+              eip712.message
+          );
 
-              const decryptedValue = result[ciphertextHandle];
-              let resultStr = decryptedValue.toString();
-              
+          setClaimStep("Decrypting secure payload...");
+          
+          const result = await fhevmInstance.userDecrypt(
+              handleContractPairs,
+              keypair.privateKey,
+              keypair.publicKey,
+              signature.replace("0x", ""),
+              contractAddresses,
+              account,
+              startTimeStamp,
+              durationDays
+          );
+          
+          let resultStr = "";
+          // Safe result extraction
+          if (Array.isArray(result)) {
+             resultStr = result[0].toString();
+          } else {
+             const values = Object.values(result);
+             if (values.length > 0) {
+                 resultStr = values[0]!.toString();
+             }
+          }
+
+          if (storageMode === StorageMode.ONCHAIN_FHE) {
               try {
                   const bigIntValue = BigInt(resultStr);
                   if (bigIntValue > 0) {
@@ -407,79 +518,68 @@ function InnerApp() {
               } catch (e) {
                   console.log("⚠️ UTF-8 conversion failed, showing raw value");
               }
-
               // Show nice modal instead of alert
               setRevealedSecret(resultStr);
 
           } else {
               // OFF-CHAIN IPFS
-              showToast("Fetching", "Getting CID from contract...", "cloud_download");
-              const cid = await contract.getCID(ownerAddr, vaultId);
-              
-              showToast("Downloading", "Fetching from IPFS...", "cloud");
-              const blob = await fetchFromIPFS(cid);
-              const text = await blob.text(); 
-              
+              setClaimStep("Decrypting AES Key...");
+              // resultStr is the BigInt of the AES Key
+              let keyBigInt: bigint;
               try {
-                  const payload = JSON.parse(text);
-                  let importedKey: CryptoKey;
-                  let keyStr = "";
-
-                  // 1. Try to find key in localStorage
-                  const storedKey = localStorage.getItem(`vault_key_latest`); 
-                  
-                  // 2. Prompt user
-                  keyStr = prompt("🔐 DECRYPTION KEY REQUIRED\n\nPlease enter the decryption key shared by the owner:", storedKey || "") || "";
-                  
-                  if (!keyStr) {
-                      alert("Decryption cancelled. Key is required.");
-                      return;
-                  }
-
-                  try {
-                      importedKey = await importKey(keyStr);
-                  } catch(err) {
-                      alert("Invalid Key Format");
-                      return;
-                  }
-
-                  if (payload.iv && payload.data) {
-                      showToast("Decrypting", "Decrypting content...", "lock_open");
-                      
-                      const iv = base64ToArrayBuffer(payload.iv);
-                      
-                      const res = await fetch(payload.data);
-                      const encryptedBlob = await res.blob();
-                      
-                      const decryptedBlob = await decryptFile(encryptedBlob, importedKey, iv);
-                      
-                      if (payload.type === 'text/plain' || pType === PayloadType.TEXT) {
-                          const decryptedText = await decryptedBlob.text();
-                          setRevealedSecret(decryptedText);
-                      } else {
-                          // Download file
-                          const url = URL.createObjectURL(decryptedBlob);
-                          const a = document.createElement('a');
-                          a.href = url;
-                          a.download = payload.name || "decrypted_file";
-                          document.body.appendChild(a);
-                          a.click();
-                          document.body.removeChild(a);
-                          URL.revokeObjectURL(url);
-                          showToast("Downloaded", "File decrypted and downloaded", "download");
-                      }
-                  } else {
-                      alert("Invalid Payload Format");
-                  }
+                  keyBigInt = BigInt(resultStr);
               } catch(e) {
-                  alert(`🔓 RAW CONTENT (Failed to parse JSON):\n\n${text}`);
+                  console.error("Failed to parse resultStr to BigInt", resultStr);
+                  throw new Error("Decryption returned invalid key format");
+              }
+
+              let keyHex = keyBigInt.toString(16);
+              if (keyHex.length % 2 !== 0) keyHex = '0' + keyHex;
+              // If it was less than 32 bytes, pad it? AES-256 key is 32 bytes (64 hex chars).
+              while (keyHex.length < 64) {
+                  keyHex = '0' + keyHex;
+              }
+              
+              const rawKey = ethers.getBytes("0x" + keyHex);
+              const importedKey = await importKeyRaw(rawKey);
+
+              // We already fetched IPFS payload earlier
+              if (ipfsPayload && ipfsPayload.iv && ipfsPayload.data) {
+                  setClaimStep("Finalizing decryption...");
+                  
+                  const iv = base64ToArrayBuffer(ipfsPayload.iv);
+                  
+                  const res = await fetch(ipfsPayload.data);
+                  const encryptedBlob = await res.blob();
+                  
+                  const decryptedBlob = await decryptFile(encryptedBlob, importedKey, iv);
+                  
+                  if (ipfsPayload.type === 'text/plain' || pType === PayloadType.TEXT) {
+                      const decryptedText = await decryptedBlob.text();
+                      setRevealedSecret(decryptedText);
+                  } else {
+                      // Download file
+                      const url = URL.createObjectURL(decryptedBlob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = ipfsPayload.name || "decrypted_file";
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                      URL.revokeObjectURL(url);
+                      showToast("Downloaded", "File decrypted and downloaded", "download");
+                  }
+              } else {
+                  alert("Invalid Payload Format");
               }
           }
           
       } catch (e: any) {
           console.error("❌ View Error:", e);
-          setIsFHELoading(false);
           showToast("Error", e.message || "Failed to view secret", "error");
+      } finally {
+          setClaimLoading(prev => ({...prev, [vaultId]: false}));
+          setClaimStep("");
       }
   };
 
@@ -618,6 +718,15 @@ function InnerApp() {
         </div>
       )}
 
+      {/* CLAIM / UNLOCK LOADER OVERLAY */}
+      {Object.values(claimLoading).some(Boolean) && (
+        <div className="claim-loader-overlay">
+            <div className="claim-loader-spinner"></div>
+            <h3 className="text-xl font-bold mb-2">Secure Vault Access</h3>
+            <p className="text-gray-500 font-mono text-xs uppercase tracking-wider">{claimStep}</p>
+        </div>
+      )}
+
       {/* REVEALED SECRET MODAL */}
       {revealedSecret && (
           <div className="secret-modal-overlay" onClick={() => setRevealedSecret(null)}>
@@ -625,11 +734,9 @@ function InnerApp() {
                   <div className="flex justify-between items-center mb-6">
                       <div className="flex items-center gap-3">
                           <span className="material-symbols-outlined text-2xl text-green-500">lock_open</span>
-                          <h3 className="text-2xl font-bold">Secret Decrypted</h3>
+                          <h3 className="text-2xl font-bold">Vault Unlocked</h3>
                       </div>
-                      <button onClick={() => setRevealedSecret(null)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 transition-colors">
-                          <span className="material-symbols-outlined">close</span>
-                      </button>
+                      <div className="bg-green-100 text-green-800 text-xs font-bold px-2 py-1 rounded-md">Verified Beneficiary</div>
                   </div>
                   
                   <div className="text-sm text-gray-500 font-bold uppercase tracking-wider mb-2">Payload Content</div>
@@ -637,13 +744,13 @@ function InnerApp() {
                       {revealedSecret}
                   </div>
 
-                  <div className="flex gap-3">
+                  <div className="flex gap-3 mb-4">
                       <button onClick={copyToClipboard} className="flex-1 py-3 bg-black text-white rounded-xl font-bold hover:bg-zyellow hover:text-black transition-colors flex items-center justify-center gap-2">
                           <span className="material-symbols-outlined text-sm">content_copy</span> Copy
                       </button>
-                      <button onClick={() => setRevealedSecret(null)} className="flex-1 py-3 bg-gray-100 text-black rounded-xl font-bold hover:bg-gray-200 transition-colors">
-                          Close
-                      </button>
+                  </div>
+                  <div className="text-center">
+                     <p className="text-[10px] text-gray-400 font-mono">This data was never exposed in plaintext on-chain.</p>
                   </div>
               </div>
           </div>
@@ -724,14 +831,27 @@ function InnerApp() {
                                     <label className="text-xs font-bold text-gray-500 uppercase">Storage Mode</label>
                                     <div className="flex gap-4 mb-4">
                                         <div onClick={() => { if(payloadType !== PayloadType.FILE) setStorageMode(StorageMode.ONCHAIN_FHE); }} 
-                                             className={`flex-1 cursor-pointer border-2 rounded-xl p-4 flex flex-col items-center gap-2 transition-all ${storageMode===StorageMode.ONCHAIN_FHE ? 'border-black bg-gray-50' : 'border-gray-200 hover:bg-gray-50'} ${payloadType === PayloadType.FILE ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                                             className={`storage-mode-card flex-1 cursor-pointer border-2 rounded-xl p-4 flex flex-col items-center gap-2 transition-all ${storageMode===StorageMode.ONCHAIN_FHE ? 'active' : 'border-gray-200 hover:bg-gray-50'} ${payloadType === PayloadType.FILE ? 'opacity-50 cursor-not-allowed' : ''}`}>
                                             <span className="material-symbols-outlined">enhanced_encryption</span>
                                             <span className="text-xs font-bold">On-Chain FHE</span>
                                         </div>
                                         <div onClick={() => setStorageMode(StorageMode.OFFCHAIN_IPFS)} 
-                                             className={`flex-1 cursor-pointer border-2 rounded-xl p-4 flex flex-col items-center gap-2 transition-all ${storageMode===StorageMode.OFFCHAIN_IPFS ? 'border-black bg-gray-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+                                             className={`storage-mode-card flex-1 cursor-pointer border-2 rounded-xl p-4 flex flex-col items-center gap-2 transition-all ${storageMode===StorageMode.OFFCHAIN_IPFS ? 'active' : 'border-gray-200 hover:bg-gray-50'}`}>
                                             <span className="material-symbols-outlined">cloud_queue</span>
                                             <span className="text-xs font-bold">Off-Chain IPFS</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="mt-2">
+                                        <label className="text-[10px] font-bold text-gray-400 uppercase">Encryption Strength</label>
+                                        <div className="security-level-bar mt-1">
+                                            <div 
+                                                className="security-level-fill" 
+                                                style={{width: storageMode === StorageMode.ONCHAIN_FHE ? '100%' : '75%'}}
+                                            ></div>
+                                        </div>
+                                        <div className="flex justify-between mt-1">
+                                            <span className="text-[10px] font-mono text-gray-400">{storageMode === StorageMode.ONCHAIN_FHE ? "MILITARY GRADE (FHE)" : "STANDARD (AES-256)"}</span>
                                         </div>
                                     </div>
                                 </div>
@@ -750,9 +870,21 @@ function InnerApp() {
                                     </div>
                                     
                                     {payloadType === PayloadType.TEXT ? (
-                                        <textarea value={secretText} onChange={(e) => setSecretText(e.target.value)} className="z-input h-32 resize-none" placeholder="Enter private keys or secret message..."></textarea>
+                                        <textarea value={secretText} onChange={(e) => setSecretText(e.target.value)} className="z-input h-32 resize-none input-field-elevate transition-all duration-300" placeholder="Enter private keys or secret message..."></textarea>
                                     ) : (
-                                        <div className="relative h-32 border-2 border-dashed border-gray-300 rounded-xl bg-gray-50 hover:bg-white transition-colors flex flex-col items-center justify-center text-gray-400">
+                                        <div 
+                                            className={`file-drop-zone relative h-32 border-2 border-dashed border-gray-300 rounded-xl bg-gray-50 hover:bg-white transition-all duration-300 flex flex-col items-center justify-center text-gray-400 ${isDragOver ? 'drag-active' : ''}`}
+                                            onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+                                            onDragLeave={() => setIsDragOver(false)}
+                                            onDrop={(e) => { 
+                                                e.preventDefault(); 
+                                                setIsDragOver(false); 
+                                                if(e.dataTransfer.files?.[0]) {
+                                                    setFile(e.dataTransfer.files[0]);
+                                                    setFileMeta(e.dataTransfer.files[0].name); 
+                                                }
+                                            }}
+                                        >
                                             <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => { 
                                                 if(e.target.files?.[0]) {
                                                     setFile(e.target.files[0]);
@@ -769,7 +901,7 @@ function InnerApp() {
                                     <label className="text-xs font-bold text-gray-500 uppercase">Heartbeat Timer</label>
                                     <div className="p-6 bg-white rounded-xl border border-gray-200 shadow-sm space-y-4">
                                         <div className="flex justify-between items-center mb-2">
-                                            <span className="text-4xl font-bold font-mono tracking-tighter">{durationVal}</span>
+                                            <span className="text-4xl font-bold font-mono tracking-tighter transition-all">{durationVal}</span>
                                             <div className="z-select-wrapper">
                                                 <select value={durationUnit} onChange={(e) => setDurationUnit(e.target.value as any)} className="bg-gray-100 font-bold text-sm px-4 py-2 pr-10 rounded-lg appearance-none cursor-pointer outline-none">
                                                     <option value="minutes">Minutes</option>
@@ -778,7 +910,10 @@ function InnerApp() {
                                                 </select>
                                             </div>
                                         </div>
-                                        <input type="range" min="1" max="100" value={durationVal} onChange={(e) => setDurationVal(Number(e.target.value))} className="accent-black w-full" />
+                                        <div className="range-slider-container">
+                                            <div className="range-tooltip" style={{left: `${(durationVal / 100) * 100}%`}}>{durationVal} {durationUnit}</div>
+                                            <input type="range" min="1" max="100" value={durationVal} onChange={(e) => setDurationVal(Number(e.target.value))} className="accent-black w-full" />
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -788,7 +923,10 @@ function InnerApp() {
                                 <label className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3 block">Beneficiary Address</label>
                                 <div className="flex items-center gap-3">
                                     <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-purple-400 to-blue-500 shadow-inner"></div>
-                                    <input type="text" value={beneficiaryInput} onChange={(e) => setBeneficiaryInput(e.target.value)} placeholder="0x..." className="flex-1 bg-transparent border-b-2 border-gray-200 focus:border-black font-mono text-sm py-2 outline-none transition-colors" />
+                                    <input type="text" value={beneficiaryInput} onChange={(e) => setBeneficiaryInput(e.target.value)} placeholder="0x..." className="input-field-elevate flex-1 bg-transparent border-b-2 border-gray-200 focus:border-black font-mono text-sm py-2 outline-none transition-colors" />
+                                </div>
+                                <div className="mt-2 h-1 w-full bg-gray-100 rounded overflow-hidden">
+                                     <div className={`h-full transition-all duration-500 ${ethers.isAddress(beneficiaryInput) ? 'bg-green-500 w-full' : 'bg-transparent w-0'}`}></div>
                                 </div>
                             </div>
                             <button onClick={createVault} disabled={isLoading} className="w-full group relative overflow-hidden bg-black text-white rounded-[1.5rem] p-6 text-left shadow-2xl transition-all hover:scale-[1.02]">
@@ -824,7 +962,7 @@ function InnerApp() {
                         ) : (
                             <div className="grid md:grid-cols-2 gap-6">
                                 {myVaults.map((vault) => (
-                                    <div key={vault.id} className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm flex flex-col gap-6 hover:shadow-lg transition-all">
+                                    <div key={vault.id} className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm flex flex-col gap-6 hover:shadow-lg hover:-translate-y-1 transition-all">
                                         <div className="flex justify-between items-start">
                                             <div>
                                                 <h3 className="text-2xl font-bold">VAULT #{vault.id}</h3>
@@ -839,7 +977,7 @@ function InnerApp() {
                                                 </span>
                                             </div>
                                         </div>
-                                        <div className={`px-3 py-1 text-white text-xs font-bold rounded-full w-fit ${getStatus(vault).color}`}>
+                                        <div className={`px-3 py-1 text-white text-xs font-bold rounded-full w-fit ${getStatus(vault).color} transition-colors duration-500`}>
                                             {getStatus(vault).text}
                                         </div>
                                         <div className="space-y-2">
@@ -856,8 +994,17 @@ function InnerApp() {
                                                 <span className="font-bold text-lg">{formatTimeRemaining(vault.lastPing, vault.heartbeat)}</span>
                                             </div>
                                         </div>
-                                        <button onClick={() => pingVault(vault.id)} className="w-full py-4 bg-zyellow hover:bg-black hover:text-white transition-colors text-black font-bold rounded-xl flex items-center justify-center gap-2">
-                                             <span className="material-symbols-outlined animate-pulse">ecg_heart</span> PING
+                                        <button 
+                                            onClick={() => pingVault(vault.id)} 
+                                            disabled={pingLoading[vault.id]}
+                                            className={`w-full py-4 font-bold rounded-xl flex items-center justify-center gap-2 transition-colors ${pingLoading[vault.id] ? 'bg-gray-200 text-gray-400' : 'bg-zyellow hover:bg-black hover:text-white text-black'}`}
+                                        >
+                                            {pingLoading[vault.id] ? (
+                                                <div className="ping-loader"></div>
+                                            ) : (
+                                                <span className="material-symbols-outlined animate-pulse">ecg_heart</span>
+                                            )}
+                                            {pingLoading[vault.id] ? "Sending heartbeat..." : "PING"}
                                         </button>
                                     </div>
                                 ))}

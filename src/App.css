@@ -201,6 +201,29 @@ input[type=range]::-webkit-slider-runnable-track {
   border-radius: 2px;
 }
 
+/* Tooltip implementation for slider */
+.range-slider-container {
+    position: relative;
+    width: 100%;
+}
+.range-tooltip {
+    position: absolute;
+    top: -40px;
+    transform: translateX(-50%);
+    background: black;
+    color: white;
+    padding: 4px 8px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: bold;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+.range-slider-container:hover .range-tooltip {
+    opacity: 1;
+}
+
 /* FX Canvas */
 #noise-canvas, #particle-canvas {
   position: fixed; inset: 0; pointer-events: none;
@@ -305,5 +328,73 @@ input[type=range]::-webkit-slider-runnable-track {
   overflow-y: auto;
 }
 
+/* --- LOADERS --- */
+.ping-loader {
+  width: 24px;
+  height: 24px;
+  border: 2px solid rgba(0, 0, 0, 0.1);
+  border-left-color: #000;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.claim-loader-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(5px);
+  z-index: 9998;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.claim-loader-spinner {
+    width: 48px;
+    height: 48px;
+    border: 3px solid rgba(0, 0, 0, 0.1);
+    border-top-color: #000;
+    border-radius: 50%;
+    animation: spin 1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+    margin-bottom: 24px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes scaleUp { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+/* Create Vault Enhancements */
+.input-field-elevate:focus {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1);
+}
+
+.storage-mode-card.active {
+    border-color: #000;
+    background-color: #f8fafc;
+    transform: scale(1.02);
+}
+
+.file-drop-zone.drag-active {
+    border-color: #000;
+    background-color: #f0fdf4;
+}
+
+.security-level-bar {
+    height: 4px;
+    background: #e2e8f0;
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.security-level-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #ef4444, #eab308, #22c55e);
+    width: 0%;
+    transition: width 0.5s ease-out;
+}

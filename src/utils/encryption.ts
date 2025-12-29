@@ -30,6 +30,24 @@ export const importKey = async (jwkStr: string): Promise<CryptoKey> => {
     );
 };
 
+export const exportKeyRaw = async (key: CryptoKey): Promise<Uint8Array> => {
+    const exported = await window.crypto.subtle.exportKey("raw", key);
+    return new Uint8Array(exported);
+};
+
+export const importKeyRaw = async (rawKey: Uint8Array): Promise<CryptoKey> => {
+    return window.crypto.subtle.importKey(
+        "raw",
+        rawKey as any,
+        {
+            name: "AES-GCM",
+            length: 256,
+        },
+        true,
+        ["encrypt", "decrypt"]
+    );
+};
+
 export const encryptFile = async (file: File, key: CryptoKey): Promise<{ encryptedBlob: Blob, iv: Uint8Array }> => {
     const iv = window.crypto.getRandomValues(new Uint8Array(12));
     const arrayBuffer = await file.arrayBuffer();
