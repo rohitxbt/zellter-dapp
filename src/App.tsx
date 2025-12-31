@@ -13,7 +13,7 @@ import { generateAESKey, encryptFile, decryptFile, arrayBufferToBase64, base64To
 gsap.registerPlugin(TextPlugin, Flip);
 
 // Constants
-const CONTRACT_ADDRESS = "0x2EF543704138e5a7fd65430fcCE0cef6c84bF101";
+const CONTRACT_ADDRESS = "0x57af6d9aa18bA14b58568C480fbBE87eaFAf26Ac";
 const ZETTER_ABI = ZetterArtifact.abi;
 const SEPOLIA_CHAIN_ID = 11155111;
 const PRIVY_APP_ID = "cmjmgu9k001c5ky0c3hoppj1m";
@@ -32,6 +32,7 @@ interface VaultData {
     status: 'active' | 'expired' | 'claimed';
     payloadType: number;
     storageMode: number;
+    vaultName?: string;
 }
 
 function InnerApp() {
@@ -65,6 +66,7 @@ function InnerApp() {
     const [durationVal, setDurationVal] = useState<number>(30);
     const [durationUnit, setDurationUnit] = useState<'minutes' | 'days' | 'years'>('days');
     const [beneficiaryInput, setBeneficiaryInput] = useState("");
+    const [vaultNameInput, setVaultNameInput] = useState("");
     const [isDragOver, setIsDragOver] = useState(false); // For drop zone
 
     // Data State
@@ -235,21 +237,24 @@ function InnerApp() {
 
                 showToast("Generating Proof", "Constructing Zero-Knowledge Proof...", "psychology");
                 const encResult = await input.encrypt();
+                console.log("FHE encrypt result:", encResult);
+
+                // Handle new FHEVM SDK structure: response.handles and response.signatures
+                const handles = encResult.response?.handles || encResult.handles;
+                const proof = encResult.response?.signatures?.[0] || encResult.inputProof;
 
                 // STRICT HEX CONVERSION for On-Chain mode
-                // Ensure we handle Uint8Array correctly
-                let handleBytes = encResult.handles[0];
+                let handleBytes = handles[0];
                 if (handleBytes instanceof Uint8Array) {
                     encryptedSecretHandle = ethers.hexlify(handleBytes);
                 } else {
-                    // Fallback if SDK returns something else (unlikely based on type)
                     encryptedSecretHandle = handleBytes;
                 }
 
-                if (typeof encResult.inputProof !== 'string') {
-                    inputProof = ethers.hexlify(encResult.inputProof);
+                if (typeof proof !== 'string') {
+                    inputProof = ethers.hexlify(proof);
                 } else {
-                    inputProof = encResult.inputProof;
+                    inputProof = proof;
                 }
 
             } else {
@@ -287,26 +292,35 @@ function InnerApp() {
                 // 4. Encrypt AES Key using FHE
                 showToast("Securing Key", "Encrypting key with FHE...", "vpn_key");
                 const rawKey = await exportKeyRaw(key);
+                console.log("Raw AES key:", rawKey);
                 const keyBigInt = BigInt(ethers.hexlify(rawKey));
+                console.log("Key as BigInt:", keyBigInt.toString());
 
-                const input = fhevmInstance.createEncryptedInput(CONTRACT_ADDRESS, beneficiaryInput);
+                // Use account (not beneficiaryInput) for createEncryptedInput - beneficiary access is handled by contract
+                console.log("Creating FHE input with contract:", CONTRACT_ADDRESS, "user:", account);
+                const input = fhevmInstance.createEncryptedInput(CONTRACT_ADDRESS, account);
                 input.add256(keyBigInt);
                 const encResult = await input.encrypt();
+                console.log("FHE encrypt result (IPFS):", encResult);
+
+                // Handle new FHEVM SDK structure: response.handles and response.signatures
+                const handles = encResult.response?.handles || encResult.handles;
+                const proof = encResult.response?.signatures?.[0] || encResult.inputProof;
 
                 // Convert byte array handle to Hex String
                 let handleHex;
-                if (encResult.handles[0] instanceof Uint8Array) {
-                    handleHex = ethers.hexlify(encResult.handles[0]);
+                if (handles[0] instanceof Uint8Array) {
+                    handleHex = ethers.hexlify(handles[0]);
                 } else {
-                    handleHex = encResult.handles[0];
+                    handleHex = handles[0];
                 }
 
                 encryptedSecretHandle = handleHex;
 
-                if (typeof encResult.inputProof !== 'string') {
-                    inputProof = ethers.hexlify(encResult.inputProof);
+                if (typeof proof !== 'string') {
+                    inputProof = ethers.hexlify(proof);
                 } else {
-                    inputProof = encResult.inputProof;
+                    inputProof = proof;
                 }
 
                 const payload = JSON.stringify({
@@ -327,7 +341,17 @@ function InnerApp() {
             setIsFHELoading(false); // Hide custom loader
 
             console.log("Sending createVault transaction...");
-            console.log("Params:", { seconds: seconds.toString(), beneficiaryInput, payloadType, storageMode });
+            console.log("Params:", {
+                seconds: seconds.toString(),
+                beneficiaryInput,
+                payloadType,
+                storageMode,
+                encryptedSecretHandle,
+                inputProofLength: inputProof?.length,
+                cid
+            });
+            console.log("Full encryptedSecretHandle:", encryptedSecretHandle);
+            console.log("Full inputProof:", inputProof);
 
             let tx;
             try {
@@ -352,12 +376,36 @@ function InnerApp() {
             try {
                 const receipt = await tx.wait();
                 console.log("Transaction confirmed:", receipt);
+
+                // Get vaultId from event logs and set vault name if provided
+                if (vaultNameInput && receipt.logs) {
+                    try {
+                        // Find VaultCreated event to get vaultId
+                        const iface = new ethers.Interface(ZETTER_ABI);
+                        for (const log of receipt.logs) {
+                            try {
+                                const parsed = iface.parseLog({ topics: log.topics as string[], data: log.data });
+                                if (parsed && parsed.name === "VaultCreated") {
+                                    const vaultId = parsed.args.vaultId;
+                                    console.log("Setting vault name for vault:", vaultId.toString());
+                                    const nameTx = await contract.setVaultName(vaultId, vaultNameInput);
+                                    await nameTx.wait();
+                                    console.log("Vault name set successfully");
+                                    break;
+                                }
+                            } catch (e) { /* ignore parse errors for other logs */ }
+                        }
+                    } catch (nameError) {
+                        console.error("Failed to set vault name:", nameError);
+                    }
+                }
             } catch (waitError: any) {
                 console.error("Transaction failed:", waitError);
                 throw new Error("Transaction reverted on chain");
             }
 
             showToast("Success", "Vault Created.", "lock");
+            setVaultNameInput(""); // Reset vault name input
             setView('vaults');
             fetchMyVaults();
 
@@ -587,8 +635,32 @@ function InnerApp() {
 
                     const iv = base64ToArrayBuffer(ipfsPayload.iv);
 
-                    const res = await fetch(ipfsPayload.data);
-                    const encryptedBlob = await res.blob();
+                    // ipfsPayload.data is a base64 data URL, decode directly (fetch fails on large data URLs)
+                    let encryptedBlob: Blob;
+                    let base64Data = ipfsPayload.data;
+
+                    // Extract base64 from data URL if present
+                    if (base64Data.startsWith('data:')) {
+                        // Format: data:mime/type;base64,ACTUAL_DATA
+                        const base64Index = base64Data.indexOf(',');
+                        if (base64Index > -1) {
+                            base64Data = base64Data.substring(base64Index + 1);
+                        }
+                    }
+
+                    // Decode base64 directly
+                    try {
+                        const binaryStr = atob(base64Data);
+                        const bytes = new Uint8Array(binaryStr.length);
+                        for (let i = 0; i < binaryStr.length; i++) {
+                            bytes[i] = binaryStr.charCodeAt(i);
+                        }
+                        encryptedBlob = new Blob([bytes]);
+                        console.log("Decoded encrypted blob size:", encryptedBlob.size);
+                    } catch (decodeErr) {
+                        console.error("Base64 decode failed:", decodeErr);
+                        throw new Error("Failed to decode encrypted payload");
+                    }
 
                     const decryptedBlob = await decryptFile(encryptedBlob, importedKey, iv);
 
@@ -637,6 +709,11 @@ function InnerApp() {
 
             for (const id of ids) {
                 const details = await contract.getVaultDetails(account, id);
+                let vaultName = "";
+                try {
+                    vaultName = await contract.getVaultName(account, id);
+                } catch (e) { /* ignore if no name set */ }
+
                 loadedVaults.push({
                     id: Number(id),
                     owner: account,
@@ -646,7 +723,8 @@ function InnerApp() {
                     claimed: details[3],
                     status: 'active',
                     payloadType: Number(details[5]),
-                    storageMode: Number(details[6])
+                    storageMode: Number(details[6]),
+                    vaultName: vaultName || undefined
                 });
             }
             setMyVaults(loadedVaults);
@@ -667,6 +745,11 @@ function InnerApp() {
                 const id = ids[i];
                 try {
                     const d = await contract.getVaultDetails(owner, id);
+                    let vaultName = "";
+                    try {
+                        vaultName = await contract.getVaultName(owner, id);
+                    } catch (e) { /* ignore if no name set */ }
+
                     loadedVaults.push({
                         id: Number(id),
                         owner: owner,
@@ -676,7 +759,8 @@ function InnerApp() {
                         claimed: d[3],
                         status: 'active',
                         payloadType: Number(d[5]),
-                        storageMode: Number(d[6])
+                        storageMode: Number(d[6]),
+                        vaultName: vaultName || undefined
                     });
                 } catch (e) { }
             }
@@ -805,6 +889,10 @@ function InnerApp() {
                             <span className="font-mono text-[10px] text-gray-400 leading-none mt-1">PROTOCOL V4.2</span>
                         </div>
                     </div>
+                    <a href="" target="_blank" rel="noopener noreferrer" className="hidden md:flex items-center gap-2 px-4 py-2 bg-black text-zyellow rounded-full text-xs font-bold hover:bg-zyellow hover:text-black transition-all shadow-md">
+                        <span className="material-symbols-outlined text-sm">play_circle</span>
+                        How it Works
+                    </a>
 
                     <div className="relative">
                         {authenticated ? (
@@ -964,6 +1052,17 @@ function InnerApp() {
                                             <div className={`h-full transition-all duration-500 ${ethers.isAddress(beneficiaryInput) ? 'bg-green-500 w-full' : 'bg-transparent w-0'}`}></div>
                                         </div>
                                     </div>
+
+                                    <div className="glass-panel rounded-[2rem] p-8 shadow-xl">
+                                        <label className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3 block">Vault Name (Optional)</label>
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-yellow-400 to-orange-500 shadow-inner hover-scale flex items-center justify-center">
+                                                <span className="material-symbols-outlined text-white text-xl">label</span>
+                                            </div>
+                                            <input type="text" value={vaultNameInput} onChange={(e) => setVaultNameInput(e.target.value)} placeholder="e.g., Dad's Crypto Keys" className="input-glow input-field-elevate flex-1 bg-transparent border-b-2 border-gray-200 focus:border-black font-sans text-sm py-2 outline-none transition-colors" maxLength={50} />
+                                        </div>
+                                        <div className="mt-2 text-[10px] text-gray-400">{vaultNameInput.length}/50 characters</div>
+                                    </div>
                                     <button onClick={createVault} disabled={isLoading} className="w-full group relative overflow-hidden bg-black text-white rounded-[1.5rem] p-6 text-left shadow-2xl transition-all hover:scale-[1.02] btn-slide-fill hover:shadow-yellow">
                                         <div className="relative z-10 flex justify-between items-center">
                                             <div>
@@ -971,7 +1070,7 @@ function InnerApp() {
                                                     {isLoading ? (isFHELoading ? "Processing..." : "Confirming...") : "Lock Vault"}
                                                 </div>
                                                 <div className="text-xs text-gray-400 font-mono">
-                                                    {isFHELoading ? "Encrypting with FHE" : "0.02 ETH GAS FEE"}
+                                                    {isFHELoading ? "Encrypting with FHE" : "Click to create vault"}
                                                 </div>
                                             </div>
                                             <div className="w-12 h-12 rounded-full border border-gray-600 flex items-center justify-center group-hover:bg-zyellow group-hover:text-black transition-all">
@@ -1000,8 +1099,8 @@ function InnerApp() {
                                             <div key={vault.id} className="vault-card card-shine bg-white p-6 rounded-3xl border border-gray-100 shadow-soft flex flex-col gap-6">
                                                 <div className="flex justify-between items-start">
                                                     <div>
-                                                        <h3 className="text-2xl font-bold">VAULT #{vault.id}</h3>
-                                                        <p className="text-xs text-gray-400 font-mono">BENEFICIARY: {vault.beneficiary.substring(0, 6)}...</p>
+                                                        <h3 className="text-2xl font-bold">{vault.vaultName || `VAULT #${vault.id}`}</h3>
+                                                        <p className="text-xs text-gray-400 font-mono">{vault.vaultName ? `Vault #${vault.id} • ` : ''}BENEFICIARY: {vault.beneficiary.substring(0, 6)}...</p>
                                                     </div>
                                                     <div className="flex gap-2">
                                                         <span className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center" title={vault.payloadType === PayloadType.TEXT ? "Text" : "File"}>
@@ -1059,7 +1158,7 @@ function InnerApp() {
                                         <div key={i} className="vault-card card-shine bg-white p-6 rounded-3xl border border-gray-100 shadow-soft">
                                             <div className="mb-4">
                                                 <div className="flex justify-between">
-                                                    <h3 className="text-lg font-bold truncate">Owner: {v.owner.substring(0, 6)}...</h3>
+                                                    <h3 className="text-lg font-bold truncate">{v.vaultName || `Owner: ${v.owner.substring(0, 6)}...`}</h3>
                                                     <div className="flex gap-1">
                                                         <span className="w-6 h-6 rounded bg-gray-100 flex items-center justify-center">
                                                             <span className="material-symbols-outlined text-xs text-gray-600">{v.payloadType === PayloadType.TEXT ? "short_text" : "attach_file"}</span>
@@ -1069,7 +1168,7 @@ function InnerApp() {
                                                         </span>
                                                     </div>
                                                 </div>
-                                                <h4 className="text-sm font-mono text-gray-500">Vault #{v.id}</h4>
+                                                <h4 className="text-sm font-mono text-gray-500">Vault #{v.id} • Owner: {v.owner.substring(0, 6)}...</h4>
                                                 <div className="flex items-center gap-2 mt-2">
                                                     <span className={`w-2 h-2 rounded-full ${getStatus(v).color} ${getStatus(v).active ? '' : 'status-pulse'}`}></span>
                                                     <span className="text-xs font-bold text-gray-500">{getStatus(v).text}</span>
