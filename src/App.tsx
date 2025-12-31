@@ -160,13 +160,22 @@ function InnerApp() {
     // View Transitions
     useEffect(() => {
         if (view === 'create') {
-            gsap.from(".glass-panel", { y: 20, opacity: 0, duration: 0.6, stagger: 0.1, ease: "power3.out" });
+            gsap.fromTo(".glass-panel",
+                { y: 20, opacity: 0 },
+                { y: 0, opacity: 1, duration: 0.6, stagger: 0.1, ease: "power3.out", clearProps: "all" }
+            );
         }
         if (view === 'vaults') {
-            gsap.from(".glass-panel", { scale: 0.95, opacity: 0, duration: 0.5, ease: "back.out(1.7)" });
+            gsap.fromTo(".glass-panel",
+                { scale: 0.95, opacity: 0 },
+                { scale: 1, opacity: 1, duration: 0.5, ease: "back.out(1.7)", clearProps: "all" }
+            );
         }
         if (view === 'claim') {
-            gsap.from(".glass-panel", { x: -20, opacity: 0, duration: 0.5, ease: "power2.out" });
+            gsap.fromTo(".glass-panel",
+                { x: -20, opacity: 0 },
+                { x: 0, opacity: 1, duration: 0.5, ease: "power2.out", clearProps: "all" }
+            );
         }
     }, [view]);
 
@@ -1043,7 +1052,7 @@ function InnerApp() {
                                 </div>
                                 <div className="lg:col-span-5 space-y-6">
                                     <div className="glass-panel rounded-[2rem] p-8 shadow-xl">
-                                        <label className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3 block">Beneficiary Address</label>
+                                        <label className="text-xs font-bold text-gray-700 uppercase tracking-wide mb-3 block">Beneficiary Address</label>
                                         <div className="flex items-center gap-3">
                                             <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-purple-400 to-blue-500 shadow-inner hover-scale"></div>
                                             <input type="text" value={beneficiaryInput} onChange={(e) => setBeneficiaryInput(e.target.value)} placeholder="0x..." className="input-glow input-field-elevate flex-1 bg-transparent border-b-2 border-gray-200 focus:border-black font-mono text-sm py-2 outline-none transition-colors" />
@@ -1054,7 +1063,7 @@ function InnerApp() {
                                     </div>
 
                                     <div className="glass-panel rounded-[2rem] p-8 shadow-xl">
-                                        <label className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3 block">Vault Name (Optional)</label>
+                                        <label className="text-xs font-bold text-gray-800 uppercase tracking-wide mb-3 block">Vault Name (Optional)</label>
                                         <div className="flex items-center gap-3">
                                             <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-yellow-400 to-orange-500 shadow-inner hover-scale flex items-center justify-center">
                                                 <span className="material-symbols-outlined text-white text-xl">label</span>
