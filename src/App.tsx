@@ -289,7 +289,7 @@ function InnerApp() {
                 const rawKey = await exportKeyRaw(key);
                 const keyBigInt = BigInt(ethers.hexlify(rawKey));
 
-                const input = fhevmInstance.createEncryptedInput(CONTRACT_ADDRESS, account);
+                const input = fhevmInstance.createEncryptedInput(CONTRACT_ADDRESS, beneficiaryInput);
                 input.add256(keyBigInt);
                 const encResult = await input.encrypt();
 
