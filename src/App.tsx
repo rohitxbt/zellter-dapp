@@ -806,20 +806,17 @@ function InnerApp() {
                         </div>
                     </div>
 
-                    <div className="relative group/wallet">
-                        <button onClick={authenticated ? undefined : handleConnect} className="btn-core bg-white border border-black text-black px-6 py-2.5 font-bold text-xs uppercase tracking-wider flex items-center gap-2 hover:bg-black hover:text-white transition-all shadow-md overflow-hidden">
-                            <span className="relative z-10 flex items-center gap-2">
+                    <div className="relative">
+                        {authenticated ? (
+                            <button onClick={() => { logout(); setView('hero'); setAccount(null); showToast("Disconnected", "Wallet disconnected", "link_off"); }} className="btn-core bg-white border border-black text-black px-6 py-2.5 font-bold text-xs uppercase tracking-wider flex items-center gap-2 hover:bg-red-500 hover:text-white hover:border-red-500 transition-all shadow-md">
+                                <span className="material-symbols-outlined text-base">logout</span>
+                                <span>{account ? `${account.substring(0, 6)}...` : "Disconnect"}</span>
+                            </button>
+                        ) : (
+                            <button onClick={handleConnect} className="btn-core bg-white border border-black text-black px-6 py-2.5 font-bold text-xs uppercase tracking-wider flex items-center gap-2 hover:bg-black hover:text-white transition-all shadow-md">
                                 <span className="material-symbols-outlined text-base">wallet</span>
-                                <span>{account ? `${account.substring(0, 6)}...` : "Connect Wallet"}</span>
-                            </span>
-                            <div className="absolute inset-0 bg-zyellow translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
-                        </button>
-                        {authenticated && (
-                            <div className="absolute top-full right-0 mt-2 w-48 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden hidden group-hover/wallet:block animate-fade-in-up">
-                                <button onClick={() => { logout(); setView('hero'); setAccount(null); showToast("Disconnected", "Wallet disconnected", "link_off"); }} className="w-full text-left px-4 py-3 text-xs font-bold hover:bg-red-50 hover:text-red-600 transition-colors flex items-center gap-2">
-                                    <span className="material-symbols-outlined text-sm">logout</span> Disconnect
-                                </button>
-                            </div>
+                                <span>Connect Wallet</span>
+                            </button>
                         )}
                     </div>
                 </div>
@@ -849,21 +846,21 @@ function InnerApp() {
 
                 {view !== 'hero' && (
                     <div className="w-full max-w-6xl relative perspective-1000">
-                        <div className="flex justify-center mb-12 sticky top-32 z-40">
-                            <div className="bg-white/90 backdrop-blur p-1.5 rounded-full inline-flex shadow-[0_8px_30px_rgb(0,0,0,0.08)] border border-white">
-                                <button onClick={() => setView('create')} className={`px-8 py-2.5 rounded-full text-xs font-bold transition-all ${view === 'create' ? 'bg-black text-white shadow-lg' : 'text-gray-500 hover:text-black'}`}>CREATE</button>
-                                <button onClick={() => { setView('vaults'); fetchMyVaults(); }} className={`px-8 py-2.5 rounded-full text-xs font-bold transition-all ${view === 'vaults' ? 'bg-black text-white shadow-lg' : 'text-gray-500 hover:text-black'}`}>MY VAULTS</button>
-                                <button onClick={() => { setView('claim'); fetchBeneficiaryVaults(); }} className={`px-8 py-2.5 rounded-full text-xs font-bold transition-all ${view === 'claim' ? 'bg-black text-white shadow-lg' : 'text-gray-500 hover:text-black'}`}>CLAIM</button>
+                        <div className="flex justify-center mb-8 sticky top-28 z-40">
+                            <div className="bg-white/95 backdrop-blur-md p-1 rounded-full inline-flex shadow-lg border border-gray-200">
+                                <button onClick={() => setView('create')} className={`px-5 py-2 rounded-full text-xs font-bold transition-all ${view === 'create' ? 'bg-black text-white shadow-md' : 'text-gray-500 hover:text-black hover:bg-gray-100'}`}>CREATE</button>
+                                <button onClick={() => { setView('vaults'); fetchMyVaults(); }} className={`px-5 py-2 rounded-full text-xs font-bold transition-all ${view === 'vaults' ? 'bg-black text-white shadow-md' : 'text-gray-500 hover:text-black hover:bg-gray-100'}`}>MY VAULTS</button>
+                                <button onClick={() => { setView('claim'); fetchBeneficiaryVaults(); }} className={`px-5 py-2 rounded-full text-xs font-bold transition-all ${view === 'claim' ? 'bg-black text-white shadow-md' : 'text-gray-500 hover:text-black hover:bg-gray-100'}`}>CLAIM</button>
                             </div>
                         </div>
 
                         {view === 'create' && (
-                            <div className="grid lg:grid-cols-12 gap-8 items-start animate-fade-in-up">
-                                <div className="lg:col-span-7 glass-panel rounded-[2rem] p-8 md:p-12 relative overflow-hidden">
-                                    <h2 className="text-3xl font-bold mb-8 flex items-center gap-3">
-                                        <span className="w-2 h-8 bg-black"></span> Configure Vault
+                            <div className="grid lg:grid-cols-12 gap-6 items-start animate-fade-in-up">
+                                <div className="lg:col-span-7 glass-panel rounded-2xl p-6 md:p-8 relative overflow-hidden">
+                                    <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
+                                        <span className="w-1.5 h-6 bg-black rounded-full"></span> Configure Vault
                                     </h2>
-                                    <div className="space-y-6">
+                                    <div className="space-y-5">
                                         {/* Storage Mode Selection */}
                                         <div className="space-y-2">
                                             <label className="text-xs font-bold text-gray-500 uppercase">Storage Mode</label>
@@ -935,9 +932,9 @@ function InnerApp() {
                                             )}
                                         </div>
 
-                                        <div className="space-y-2 pt-4 border-t border-gray-200">
+                                        <div className="space-y-2 pt-3 border-t border-gray-200">
                                             <label className="text-xs font-bold text-gray-500 uppercase">Heartbeat Timer</label>
-                                            <div className="p-6 bg-white rounded-xl border border-gray-200 shadow-sm space-y-4">
+                                            <div className="p-4 bg-white rounded-xl border border-gray-200 shadow-sm space-y-3">
                                                 <div className="flex justify-between items-center mb-2">
                                                     <span className="text-4xl font-bold font-mono tracking-tighter transition-all">{durationVal}</span>
                                                     <div className="z-select-wrapper">
